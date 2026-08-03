@@ -1,9 +1,40 @@
 rules_version = '2';
 
-// Placeholder: deny everything until the real per-path rules land
-// (see the "Write Firestore + Storage security rules" task).
+// Unlike Firestore, image uploads go straight from the browser to Storage
+// (not proxied through the server) so large binaries don't burn Cloud Run
+// compute/bandwidth. That means these rules are the actual enforcement
+// layer for uploads: an authenticated user may only write into their own
+// uid-scoped path, and only image files under 10MB. The client sends the
+// resulting download URL to a Route Handler afterwards, which is
+// responsible for checking that URL actually points at that user's own
+// path before storing it on a post/profile doc - these rules stop a bad
+// upload from landing in Storage in the first place, the server check
+// stops a bad URL from landing in Firestore.
 service firebase.storage {
   match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function isValidImage() {
+      return request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    match /avatars/{userId}/{fileName} {
+      allow read: if signedIn();
+      allow write: if isOwner(userId) && isValidImage();
+    }
+
+    match /posts/{userId}/{postDraftId}/{fileName} {
+      allow read: if signedIn();
+      allow write: if isOwner(userId) && isValidImage();
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }
