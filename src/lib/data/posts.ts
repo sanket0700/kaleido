@@ -21,6 +21,29 @@ export async function getPost(postId: string): Promise<Post | null> {
   return { id: postId, ...(snap.data() as Omit<Post, "id">) };
 }
 
+// Firestore's "in" operator caps out at 10 comparison values. Fine for a
+// low-traffic pet project; a following list past 10 accounts would need a
+// fan-out-on-write feed instead of querying by author list directly - not
+// worth building until there's an actual reason to.
+const MAX_FEED_AUTHORS = 10;
+const FEED_PAGE_SIZE = 30;
+
+export async function getPostsByAuthors(authorIds: string[]): Promise<Post[]> {
+  if (authorIds.length === 0) return [];
+
+  const snap = await getAdminDb()
+    .collection("posts")
+    .where("authorId", "in", authorIds.slice(0, MAX_FEED_AUTHORS))
+    .orderBy("createdAt", "desc")
+    .limit(FEED_PAGE_SIZE)
+    .get();
+
+  return snap.docs.map((doc) => ({
+    id: doc.id,
+    ...(doc.data() as Omit<Post, "id">),
+  }));
+}
+
 /** Creates the post doc and bumps the author's postCount in one
  * transaction - the old backend did these as separate, un-transactional
  * writes with a fan-out loop that could partially fail. */

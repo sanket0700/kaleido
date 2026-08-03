@@ -26,6 +26,20 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
   return { uid, ...(snap.data() as Omit<UserProfile, "uid">) };
 }
 
+/** Batch lookup for rendering a list of posts/comments without an N+1
+ * waterfall - one parallel round of reads, not one per post. */
+export async function getUserProfiles(
+  uids: string[],
+): Promise<Map<string, UserProfile>> {
+  const uniqueUids = [...new Set(uids)];
+  const profiles = await Promise.all(uniqueUids.map(getUserProfile));
+  const byUid = new Map<string, UserProfile>();
+  profiles.forEach((profile, i) => {
+    if (profile) byUid.set(uniqueUids[i], profile);
+  });
+  return byUid;
+}
+
 export async function getUserProfileByUsername(
   username: string,
 ): Promise<UserProfile | null> {
