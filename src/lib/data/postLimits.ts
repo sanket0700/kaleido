@@ -2,3 +2,4 @@
 // (src/lib/data/posts.ts) and the client-side new-post form.
 export const MAX_CAPTION_LENGTH = 2200;
 export const MAX_IMAGES_PER_POST = 10;
+export const MAX_COMMENT_LENGTH = 500;

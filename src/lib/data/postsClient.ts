@@ -48,3 +48,38 @@ export async function createPost(
   const data = await res.json();
   return data.postId as string;
 }
+
+export async function toggleLike(
+  postId: string,
+): Promise<{ liked: boolean; likeCount: number }> {
+  const user = getFirebaseAuth().currentUser;
+  if (!user) throw new Error("Not signed in.");
+  const idToken = await user.getIdToken();
+
+  const res = await fetch(`/api/posts/${postId}/like`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ idToken }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error(data?.error ?? "Couldn't update like.");
+  }
+  return res.json();
+}
+
+export async function addComment(postId: string, text: string): Promise<void> {
+  const user = getFirebaseAuth().currentUser;
+  if (!user) throw new Error("Not signed in.");
+  const idToken = await user.getIdToken();
+
+  const res = await fetch(`/api/posts/${postId}/comments`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ idToken, text }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error(data?.error ?? "Couldn't post comment.");
+  }
+}
