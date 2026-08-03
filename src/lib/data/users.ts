@@ -40,6 +40,23 @@ export async function getUserProfiles(
   return byUid;
 }
 
+const BROWSE_USERS_LIMIT = 50;
+
+/** Phase-1 discovery mechanism for /people - no search yet, just the
+ * most-recently-joined accounts (excluding yourself). */
+export async function listOtherUsers(excludeUid: string): Promise<UserProfile[]> {
+  const snap = await getAdminDb()
+    .collection("users")
+    .orderBy("createdAt", "desc")
+    .limit(BROWSE_USERS_LIMIT + 1)
+    .get();
+
+  return snap.docs
+    .map((doc) => ({ uid: doc.id, ...(doc.data() as Omit<UserProfile, "uid">) }))
+    .filter((profile) => profile.uid !== excludeUid)
+    .slice(0, BROWSE_USERS_LIMIT);
+}
+
 export async function getUserProfileByUsername(
   username: string,
 ): Promise<UserProfile | null> {

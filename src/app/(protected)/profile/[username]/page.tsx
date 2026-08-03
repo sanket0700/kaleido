@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getSessionUser } from "@/lib/auth/session";
 import { getUserProfileByUsername } from "@/lib/data/users";
+import { isFollowing } from "@/lib/data/follows";
+import { FollowButton } from "@/components/follow-button";
 
 export default async function ProfilePage({
   params,
@@ -14,6 +16,10 @@ export default async function ProfilePage({
 
   const sessionUser = await getSessionUser();
   const isOwnProfile = sessionUser?.uid === profile.uid;
+  const following =
+    sessionUser && !isOwnProfile
+      ? await isFollowing(sessionUser.uid, profile.uid)
+      : false;
 
   return (
     <div className="mx-auto w-full max-w-2xl p-6">
@@ -37,10 +43,16 @@ export default async function ProfilePage({
           </p>
           {profile.bio && <p className="mt-1 text-sm">{profile.bio}</p>}
         </div>
-        {isOwnProfile && (
+        {isOwnProfile ? (
           <Link href="/profile/edit" className="ml-auto shrink-0 text-sm underline">
             Edit profile
           </Link>
+        ) : (
+          sessionUser && (
+            <div className="ml-auto">
+              <FollowButton targetUid={profile.uid} initialFollowing={following} />
+            </div>
+          )
         )}
       </div>
       <div className="mt-6 flex gap-6 text-sm text-zinc-600 dark:text-zinc-400">
