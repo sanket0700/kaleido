@@ -1,9 +1,17 @@
 "use client";
 
 import { type FirebaseApp, getApps, initializeApp } from "firebase/app";
-import { connectAuthEmulator, getAuth } from "firebase/auth";
-import { connectFirestoreEmulator, getFirestore } from "firebase/firestore";
-import { connectStorageEmulator, getStorage } from "firebase/storage";
+import { type Auth, connectAuthEmulator, getAuth } from "firebase/auth";
+import {
+  connectFirestoreEmulator,
+  type Firestore,
+  getFirestore,
+} from "firebase/firestore";
+import {
+  connectStorageEmulator,
+  type FirebaseStorage,
+  getStorage,
+} from "firebase/storage";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -14,27 +22,60 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
-const app: FirebaseApp = getApps()[0] ?? initializeApp(firebaseConfig);
+interface FirebaseClient {
+  app: FirebaseApp;
+  auth: Auth;
+  db: Firestore;
+  storage: FirebaseStorage;
+}
 
-export const auth = getAuth(app);
-export const db = getFirestore(app);
-export const storage = getStorage(app);
+let cached: FirebaseClient | undefined;
 
-// Connect to local emulators in dev. Guarded with a global flag because
-// Next.js Fast Refresh re-evaluates this module without a full reload,
-// and the SDK throws if you connect to an emulator twice.
 declare global {
   var __kaleidoEmulatorsConnected: boolean | undefined;
 }
 
-if (
-  process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATORS === "true" &&
-  !globalThis.__kaleidoEmulatorsConnected
-) {
-  connectAuthEmulator(auth, "http://127.0.0.1:9099", {
-    disableWarnings: true,
-  });
-  connectFirestoreEmulator(db, "127.0.0.1", 8080);
-  connectStorageEmulator(storage, "127.0.0.1", 9199);
-  globalThis.__kaleidoEmulatorsConnected = true;
+// Lazily initialized on first call, not at module import time. Next.js
+// server-renders Client Components too (for the initial HTML + hydration),
+// so eager top-level initializeApp()/getAuth() calls here would also run
+// during `next build`'s prerender pass, where no NEXT_PUBLIC_FIREBASE_*
+// config is necessarily present. Deferring until something actually calls
+// getFirebaseAuth()/etc. means this only ever runs in the browser.
+function getFirebaseClient(): FirebaseClient {
+  if (cached) return cached;
+
+  const app = getApps()[0] ?? initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+  const storage = getStorage(app);
+
+  if (
+    process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATORS === "true" &&
+    !globalThis.__kaleidoEmulatorsConnected
+  ) {
+    // Guarded by the global flag because Next.js Fast Refresh re-evaluates
+    // this module without a full reload, and the SDK throws if you connect
+    // to an emulator twice.
+    connectAuthEmulator(auth, "http://127.0.0.1:9099", {
+      disableWarnings: true,
+    });
+    connectFirestoreEmulator(db, "127.0.0.1", 8080);
+    connectStorageEmulator(storage, "127.0.0.1", 9199);
+    globalThis.__kaleidoEmulatorsConnected = true;
+  }
+
+  cached = { app, auth, db, storage };
+  return cached;
+}
+
+export function getFirebaseAuth(): Auth {
+  return getFirebaseClient().auth;
+}
+
+export function getFirebaseDb(): Firestore {
+  return getFirebaseClient().db;
+}
+
+export function getFirebaseStorage(): FirebaseStorage {
+  return getFirebaseClient().storage;
 }

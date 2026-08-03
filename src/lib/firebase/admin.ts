@@ -1,27 +1,51 @@
 import "server-only";
 
-import { type App, cert, getApps, initializeApp } from "firebase-admin/app";
-import { getAuth } from "firebase-admin/auth";
-import { getFirestore } from "firebase-admin/firestore";
-import { getStorage } from "firebase-admin/storage";
+import {
+  type App,
+  type AppOptions,
+  cert,
+  getApps,
+  initializeApp,
+} from "firebase-admin/app";
+import { getAuth, type Auth } from "firebase-admin/auth";
+import { getFirestore, type Firestore } from "firebase-admin/firestore";
+import { getStorage, type Storage } from "firebase-admin/storage";
 
-// No service-account JSON is used here on purpose. On Cloud Run this picks
-// up the attached service account automatically via Application Default
-// Credentials; locally it talks to the Firebase emulators via the
-// FIRESTORE_EMULATOR_HOST / FIREBASE_AUTH_EMULATOR_HOST /
-// FIREBASE_STORAGE_EMULATOR_HOST env vars set in .env.local. If you ever
-// need a real service-account key for local testing against the live
-// project, set GOOGLE_APPLICATION_CREDENTIALS to a path OUTSIDE the repo —
-// never commit a key file.
-const app: App =
-  getApps()[0] ??
-  initializeApp({
+// Lazily initialized on first real use, not at module import time. Route
+// Handler modules get imported during `next build`'s page-data-collection
+// pass with no env vars / emulator present - eager initializeApp() here
+// would crash the build. Deferring until a getAdmin*() is actually called
+// (i.e. inside a request) means it only ever runs with real config: the
+// emulator env vars locally, or Cloud Run's attached service account (via
+// Application Default Credentials) in production.
+function getAdminApp(): App {
+  const existing = getApps()[0];
+  if (existing) return existing;
+
+  const options: AppOptions = {
     projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-    credential: process.env.GOOGLE_APPLICATION_CREDENTIALS
-      ? cert(process.env.GOOGLE_APPLICATION_CREDENTIALS)
-      : undefined,
-  });
+  };
+  // No service-account JSON is committed to this repo. Only set
+  // GOOGLE_APPLICATION_CREDENTIALS for local testing against the live
+  // project, pointed at a key file OUTSIDE the repo - never commit one.
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    options.credential = cert(process.env.GOOGLE_APPLICATION_CREDENTIALS);
+  }
+  return initializeApp(options);
+}
 
-export const adminAuth = getAuth(app);
-export const adminDb = getFirestore(app);
-export const adminStorage = getStorage(app);
+let cachedAuth: Auth | undefined;
+let cachedDb: Firestore | undefined;
+let cachedStorage: Storage | undefined;
+
+export function getAdminAuth(): Auth {
+  return (cachedAuth ??= getAuth(getAdminApp()));
+}
+
+export function getAdminDb(): Firestore {
+  return (cachedDb ??= getFirestore(getAdminApp()));
+}
+
+export function getAdminStorage(): Storage {
+  return (cachedStorage ??= getStorage(getAdminApp()));
+}
