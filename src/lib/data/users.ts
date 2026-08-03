@@ -3,7 +3,10 @@ import "server-only";
 import { FieldValue, type Timestamp } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase/admin";
 
-export { USERNAME_PATTERN } from "@/lib/data/usernamePattern";
+export { USERNAME_PATTERN, isValidUsername } from "@/lib/data/usernamePattern";
+
+export const MAX_DISPLAY_NAME_LENGTH = 60;
+export const MAX_BIO_LENGTH = 150;
 
 export interface UserProfile {
   uid: string;
@@ -23,6 +26,18 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
   return { uid, ...(snap.data() as Omit<UserProfile, "uid">) };
 }
 
+export async function getUserProfileByUsername(
+  username: string,
+): Promise<UserProfile | null> {
+  const usernameSnap = await getAdminDb()
+    .collection("usernames")
+    .doc(username)
+    .get();
+  if (!usernameSnap.exists) return null;
+  const { uid } = usernameSnap.data() as { uid: string };
+  return getUserProfile(uid);
+}
+
 export async function isUsernameAvailable(username: string): Promise<boolean> {
   const snap = await getAdminDb().collection("usernames").doc(username).get();
   return !snap.exists;
@@ -39,6 +54,13 @@ export class ProfileExistsError extends Error {
   constructor() {
     super("Profile already exists.");
     this.name = "ProfileExistsError";
+  }
+}
+
+export class ProfileNotFoundError extends Error {
+  constructor() {
+    super("Profile not found.");
+    this.name = "ProfileNotFoundError";
   }
 }
 
@@ -70,5 +92,48 @@ export async function createUserProfile(
     };
     tx.set(userRef, { ...profile, createdAt: FieldValue.serverTimestamp() });
     tx.set(usernameRef, { uid });
+  });
+}
+
+export interface ProfileUpdate {
+  username: string;
+  displayName: string;
+  bio: string;
+  photoURL: string | null;
+}
+
+export async function updateUserProfile(
+  uid: string,
+  update: ProfileUpdate,
+): Promise<void> {
+  const db = getAdminDb();
+  const userRef = db.collection("users").doc(uid);
+  const newUsernameRef = db.collection("usernames").doc(update.username);
+
+  await db.runTransaction(async (tx) => {
+    const userSnap = await tx.get(userRef);
+    if (!userSnap.exists) throw new ProfileNotFoundError();
+    const current = userSnap.data() as Omit<UserProfile, "uid">;
+
+    const usernameChanged = current.username !== update.username;
+    if (usernameChanged) {
+      const newUsernameSnap = await tx.get(newUsernameRef);
+      if (newUsernameSnap.exists) throw new UsernameTakenError();
+    }
+
+    // All reads above must happen before any writes below - Firestore
+    // transactions require reads-before-writes.
+    if (usernameChanged) {
+      const oldUsernameRef = db.collection("usernames").doc(current.username);
+      tx.delete(oldUsernameRef);
+      tx.set(newUsernameRef, { uid });
+    }
+
+    tx.update(userRef, {
+      username: update.username,
+      displayName: update.displayName,
+      bio: update.bio,
+      photoURL: update.photoURL,
+    });
   });
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { USERNAME_PATTERN } from "@/lib/data/usernamePattern";
+import { isValidUsername } from "@/lib/data/usernamePattern";
 
 export type UsernameStatus =
   | "idle"
@@ -10,9 +10,20 @@ export type UsernameStatus =
   | "taken"
   | "invalid";
 
-export function useUsernameAvailability(username: string): UsernameStatus {
+/**
+ * @param currentUsername - pass the signed-in user's existing username on
+ * the edit-profile form so leaving the field unchanged doesn't show up as
+ * "taken" (it's reserved by their own usernames/{username} doc).
+ */
+export function useUsernameAvailability(
+  username: string,
+  currentUsername?: string,
+): UsernameStatus {
   const normalized = username.trim().toLowerCase();
-  const isValidFormat = USERNAME_PATTERN.test(normalized);
+  const isValidFormat = isValidUsername(normalized);
+  const isUnchanged =
+    currentUsername !== undefined &&
+    normalized === currentUsername.trim().toLowerCase();
 
   const [result, setResult] = useState<{
     username: string;
@@ -20,7 +31,7 @@ export function useUsernameAvailability(username: string): UsernameStatus {
   } | null>(null);
 
   useEffect(() => {
-    if (!isValidFormat) return;
+    if (!isValidFormat || isUnchanged) return;
 
     const controller = new AbortController();
     const timeout = setTimeout(async () => {
@@ -41,10 +52,11 @@ export function useUsernameAvailability(username: string): UsernameStatus {
       clearTimeout(timeout);
       controller.abort();
     };
-  }, [normalized, isValidFormat]);
+  }, [normalized, isValidFormat, isUnchanged]);
 
   if (!normalized) return "idle";
   if (!isValidFormat) return "invalid";
+  if (isUnchanged) return "available";
   if (result?.username !== normalized) return "checking";
   return result.available ? "available" : "taken";
 }
