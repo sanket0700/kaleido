@@ -1,0 +1,61 @@
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches: [main]
+
+env:
+  REGION: us-central1
+  SERVICE: kaleido
+  REPOSITORY: kaleido
+
+permissions:
+  contents: read
+  # Required for keyless auth to GCP via Workload Identity Federation -
+  # no service-account JSON key is stored in this repo.
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Build and push image
+        env:
+          IMAGE: ${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE }}
+        run: |
+          docker build \
+            --build-arg NEXT_PUBLIC_FIREBASE_API_KEY="${{ vars.NEXT_PUBLIC_FIREBASE_API_KEY }}" \
+            --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="${{ vars.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN }}" \
+            --build-arg NEXT_PUBLIC_FIREBASE_PROJECT_ID="${{ vars.NEXT_PUBLIC_FIREBASE_PROJECT_ID }}" \
+            --build-arg NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET="${{ vars.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET }}" \
+            --build-arg NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID="${{ vars.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID }}" \
+            --build-arg NEXT_PUBLIC_FIREBASE_APP_ID="${{ vars.NEXT_PUBLIC_FIREBASE_APP_ID }}" \
+            -t "$IMAGE:${{ github.sha }}" \
+            -t "$IMAGE:latest" \
+            .
+          docker push "$IMAGE:${{ github.sha }}"
+          docker push "$IMAGE:latest"
+
+      - id: deploy
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.SERVICE }}
+          region: ${{ env.REGION }}
+          image: ${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE }}:${{ github.sha }}
+
+      - name: Show deployed URL
+        run: echo "Deployed to ${{ steps.deploy.outputs.url }}"
