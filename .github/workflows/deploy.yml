@@ -56,6 +56,11 @@ jobs:
           service: ${{ env.SERVICE }}
           region: ${{ env.REGION }}
           image: ${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE }}:${{ github.sha }}
+          # Cloud Run defaults to requiring IAM auth on every invocation.
+          # This is a public app, so every deploy explicitly (and
+          # idempotently) keeps it open - not just a one-time setup step,
+          # in case the binding is ever removed some other way.
+          flags: --allow-unauthenticated
 
       - name: Show deployed URL
         run: echo "Deployed to ${{ steps.deploy.outputs.url }}"
