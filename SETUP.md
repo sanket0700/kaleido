@@ -92,6 +92,7 @@ gcloud iam workload-identity-pools providers create-oidc "github-provider" \
   --location="global" --workload-identity-pool="github-pool" \
   --display-name="GitHub provider" \
   --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository" \
+  --attribute-condition="assertion.repository=='YOUR_GITHUB_USERNAME/kaleido'" \
   --issuer-uri="https://token.actions.githubusercontent.com"
 
 # Dedicated deploy service account, least-privilege
