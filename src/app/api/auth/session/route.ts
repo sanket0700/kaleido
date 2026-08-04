@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { getAdminAuth } from "@/lib/firebase/admin";
+import { requireAuth, UnauthenticatedError } from "@/lib/auth/requireAuth";
 import {
   createSessionCookie,
   SESSION_COOKIE_NAME,
@@ -9,20 +9,19 @@ import {
 
 // Shared by both login and signup: the client authenticates with Firebase
 // Auth directly (createUserWithEmailAndPassword / signInWithEmailAndPassword),
-// then hands the resulting ID token here to be exchanged for an httpOnly
-// session cookie. Verifying the token before minting a cookie stops a
-// forged/expired token from ever producing a valid session.
+// then hands the resulting ID token here (as a Bearer header, verified by
+// requireAuth) to be exchanged for an httpOnly session cookie. Verifying
+// the token before minting a cookie stops a forged/expired token from
+// ever producing a valid session.
 export async function POST(request: NextRequest) {
-  const body = await request.json().catch(() => null);
-  const idToken = body?.idToken;
-  if (typeof idToken !== "string" || !idToken) {
-    return NextResponse.json({ error: "Missing idToken" }, { status: 400 });
-  }
-
+  let idToken: string;
   try {
-    await getAdminAuth().verifyIdToken(idToken);
-  } catch {
-    return NextResponse.json({ error: "Invalid ID token" }, { status: 401 });
+    ({ idToken } = await requireAuth(request));
+  } catch (err) {
+    if (err instanceof UnauthenticatedError) {
+      return NextResponse.json({ error: err.message }, { status: 401 });
+    }
+    throw err;
   }
 
   const sessionCookie = await createSessionCookie(idToken);

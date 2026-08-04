@@ -6,21 +6,14 @@ import {
   signOut as firebaseSignOut,
 } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebase/client";
+import { apiFetch } from "@/lib/data/apiFetch";
 
-async function establishSession(idToken: string) {
-  const res = await fetch("/api/auth/session", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ idToken }),
-  });
-  if (!res.ok) {
+async function establishSession(): Promise<void> {
+  try {
+    await apiFetch("/api/auth/session", { method: "POST" });
+  } catch {
     throw new Error("Signed in, but couldn't start a session. Try again.");
   }
-}
-
-async function readError(res: Response, fallback: string): Promise<string> {
-  const body = await res.json().catch(() => null);
-  return body?.error ?? fallback;
 }
 
 export class ProfileCreationFailedError extends Error {}
@@ -41,35 +34,21 @@ export async function signUp(
   username: string,
   displayName: string,
 ): Promise<void> {
-  const credential = await createUserWithEmailAndPassword(
-    getFirebaseAuth(),
-    email,
-    password,
-  );
-  const idToken = await credential.user.getIdToken();
+  await createUserWithEmailAndPassword(getFirebaseAuth(), email, password);
+  await establishSession();
 
-  await establishSession(idToken);
-
-  const profileRes = await fetch("/api/users", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ idToken, username, displayName }),
-  });
-  if (!profileRes.ok) {
+  try {
+    await apiFetch("/api/users", { method: "POST", body: { username, displayName } });
+  } catch (err) {
     throw new ProfileCreationFailedError(
-      await readError(profileRes, "Couldn't create your profile."),
+      err instanceof Error ? err.message : "Couldn't create your profile.",
     );
   }
 }
 
 export async function logIn(email: string, password: string): Promise<void> {
-  const credential = await signInWithEmailAndPassword(
-    getFirebaseAuth(),
-    email,
-    password,
-  );
-  const idToken = await credential.user.getIdToken();
-  await establishSession(idToken);
+  await signInWithEmailAndPassword(getFirebaseAuth(), email, password);
+  await establishSession();
 }
 
 export async function logOut(): Promise<void> {
@@ -83,18 +62,10 @@ export async function completeProfile(
   username: string,
   displayName: string,
 ): Promise<void> {
-  const user = getFirebaseAuth().currentUser;
-  if (!user) throw new Error("Not signed in.");
-  const idToken = await user.getIdToken();
-
-  const profileRes = await fetch("/api/users", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ idToken, username, displayName }),
-  });
-  if (!profileRes.ok) {
-    throw new Error(await readError(profileRes, "Couldn't create your profile."));
+  try {
+    await apiFetch("/api/users", { method: "POST", body: { username, displayName } });
+  } catch (err) {
+    throw new Error(err instanceof Error ? err.message : "Couldn't create your profile.");
   }
-
-  await establishSession(idToken);
+  await establishSession();
 }

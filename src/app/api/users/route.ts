@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { getAdminAuth } from "@/lib/firebase/admin";
+import { requireAuth, UnauthenticatedError } from "@/lib/auth/requireAuth";
 import {
   createUserProfile,
   MAX_DISPLAY_NAME_LENGTH,
@@ -14,18 +14,17 @@ import {
 // happen here so the username-uniqueness check and profile creation run
 // inside one transaction (see src/lib/data/users.ts).
 export async function POST(request: NextRequest) {
-  const body = await request.json().catch(() => null);
-  const idToken = body?.idToken;
-  if (typeof idToken !== "string" || !idToken) {
-    return NextResponse.json({ error: "Missing idToken" }, { status: 401 });
-  }
-
   let decoded;
   try {
-    decoded = await getAdminAuth().verifyIdToken(idToken);
-  } catch {
-    return NextResponse.json({ error: "Invalid ID token" }, { status: 401 });
+    ({ decoded } = await requireAuth(request));
+  } catch (err) {
+    if (err instanceof UnauthenticatedError) {
+      return NextResponse.json({ error: err.message }, { status: 401 });
+    }
+    throw err;
   }
+
+  const body = await request.json().catch(() => null);
 
   const username = String(body?.username ?? "").trim().toLowerCase();
   if (!isValidUsername(username)) {
@@ -57,7 +56,7 @@ export async function POST(request: NextRequest) {
     if (err instanceof ProfileExistsError) {
       return NextResponse.json({ error: err.message }, { status: 409 });
     }
-    console.error(err);
+    console.error("[POST /api/users]", { uid: decoded.uid, err });
     return NextResponse.json(
       { error: "Failed to create profile." },
       { status: 500 },

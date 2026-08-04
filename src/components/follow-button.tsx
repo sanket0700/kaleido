@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { toggleFollow } from "@/lib/data/followClient";
+import { setFollowing as setFollowingRemote } from "@/lib/data/followClient";
 
 export function FollowButton({
   targetUid,
@@ -18,7 +18,7 @@ export function FollowButton({
     const optimistic = !following;
     setFollowing(optimistic);
     try {
-      const result = await toggleFollow(targetUid);
+      const result = await setFollowingRemote(targetUid, optimistic);
       setFollowing(result.following);
     } catch {
       setFollowing(following);

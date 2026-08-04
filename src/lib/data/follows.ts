@@ -2,13 +2,14 @@ import "server-only";
 
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase/admin";
+import { COLLECTIONS } from "@/lib/data/collections";
 
 /** IDs of the accounts `uid` follows - reads the follows/{followerId}_
  * {followedId} docs created by the follow/unfollow action, keyed by
  * followerId so no composite index is needed for this query. */
 export async function getFollowingIds(uid: string): Promise<string[]> {
   const snap = await getAdminDb()
-    .collection("follows")
+    .collection(COLLECTIONS.follows)
     .where("followerId", "==", uid)
     .get();
   return snap.docs.map((doc) => doc.data().followedId as string);
@@ -19,7 +20,7 @@ export async function isFollowing(
   followedId: string,
 ): Promise<boolean> {
   const snap = await getAdminDb()
-    .collection("follows")
+    .collection(COLLECTIONS.follows)
     .doc(`${followerId}_${followedId}`)
     .get();
   return snap.exists;
@@ -39,48 +40,55 @@ export class UserNotFoundError extends Error {
   }
 }
 
-/** Toggles the follow relationship and both users' counters in one
- * transaction - the old backend updated following/followers arrays on two
- * separate user docs as unrelated writes with no atomicity between them. */
-export async function toggleFollow(
-  followerId: string,
-  followedId: string,
-): Promise<{ following: boolean }> {
+/** Idempotent: following an already-followed account is a no-op rather
+ * than double-incrementing counters. Split from a single toggle endpoint
+ * for the same reason as likePost/unlikePost - a toggle isn't safe to
+ * retry, and PUT vs DELETE is visible in a request log where POST
+ * .../follow (either direction) isn't. */
+export async function followUser(followerId: string, followedId: string): Promise<void> {
   if (followerId === followedId) throw new CannotFollowSelfError();
 
   const db = getAdminDb();
-  const followRef = db.collection("follows").doc(`${followerId}_${followedId}`);
-  const followerRef = db.collection("users").doc(followerId);
-  const followedRef = db.collection("users").doc(followedId);
+  const followRef = db.collection(COLLECTIONS.follows).doc(`${followerId}_${followedId}`);
+  const followerRef = db.collection(COLLECTIONS.users).doc(followerId);
+  const followedRef = db.collection(COLLECTIONS.users).doc(followedId);
 
-  return db.runTransaction(async (tx) => {
+  await db.runTransaction(async (tx) => {
     const [followSnap, followerSnap, followedSnap] = await Promise.all([
       tx.get(followRef),
       tx.get(followerRef),
       tx.get(followedRef),
     ]);
-    if (!followerSnap.exists || !followedSnap.exists) {
-      throw new UserNotFoundError();
-    }
+    if (!followerSnap.exists || !followedSnap.exists) throw new UserNotFoundError();
+    if (followSnap.exists) return; // already following
 
-    const following = !followSnap.exists;
-
-    if (following) {
-      tx.set(followRef, {
-        followerId,
-        followedId,
-        createdAt: FieldValue.serverTimestamp(),
-      });
-    } else {
-      tx.delete(followRef);
-    }
-    tx.update(followerRef, {
-      followingCount: FieldValue.increment(following ? 1 : -1),
+    tx.set(followRef, {
+      followerId,
+      followedId,
+      createdAt: FieldValue.serverTimestamp(),
     });
-    tx.update(followedRef, {
-      followerCount: FieldValue.increment(following ? 1 : -1),
-    });
+    tx.update(followerRef, { followingCount: FieldValue.increment(1) });
+    tx.update(followedRef, { followerCount: FieldValue.increment(1) });
+  });
+}
 
-    return { following };
+export async function unfollowUser(followerId: string, followedId: string): Promise<void> {
+  const db = getAdminDb();
+  const followRef = db.collection(COLLECTIONS.follows).doc(`${followerId}_${followedId}`);
+  const followerRef = db.collection(COLLECTIONS.users).doc(followerId);
+  const followedRef = db.collection(COLLECTIONS.users).doc(followedId);
+
+  await db.runTransaction(async (tx) => {
+    const [followSnap, followerSnap, followedSnap] = await Promise.all([
+      tx.get(followRef),
+      tx.get(followerRef),
+      tx.get(followedRef),
+    ]);
+    if (!followerSnap.exists || !followedSnap.exists) throw new UserNotFoundError();
+    if (!followSnap.exists) return; // already not following
+
+    tx.delete(followRef);
+    tx.update(followerRef, { followingCount: FieldValue.increment(-1) });
+    tx.update(followedRef, { followerCount: FieldValue.increment(-1) });
   });
 }

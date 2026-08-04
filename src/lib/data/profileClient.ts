@@ -2,6 +2,7 @@
 
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { getFirebaseAuth, getFirebaseStorage } from "@/lib/firebase/client";
+import { apiFetch } from "@/lib/data/apiFetch";
 
 function safeExtension(fileName: string): string {
   const ext = fileName.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -26,17 +27,5 @@ export async function updateProfile(fields: {
   bio: string;
   photoURL?: string;
 }): Promise<void> {
-  const user = getFirebaseAuth().currentUser;
-  if (!user) throw new Error("Not signed in.");
-  const idToken = await user.getIdToken();
-
-  const res = await fetch("/api/users/me", {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ idToken, ...fields }),
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => null);
-    throw new Error(data?.error ?? "Couldn't update profile.");
-  }
+  await apiFetch("/api/users/me", { method: "PATCH", body: fields });
 }

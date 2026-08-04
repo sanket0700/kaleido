@@ -1,34 +1,34 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { getAdminAuth } from "@/lib/firebase/admin";
+import { requireAuth, UnauthenticatedError } from "@/lib/auth/requireAuth";
 import {
   CannotFollowSelfError,
-  toggleFollow,
+  followUser,
+  unfollowUser,
   UserNotFoundError,
 } from "@/lib/data/follows";
 
-export async function POST(
+// PUT to follow, DELETE to unfollow - same idempotent-verb reasoning as
+// the like endpoint.
+export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ uid: string }> },
 ) {
   const { uid: targetUid } = await params;
 
-  const body = await request.json().catch(() => null);
-  const idToken = body?.idToken;
-  if (typeof idToken !== "string" || !idToken) {
-    return NextResponse.json({ error: "Missing idToken" }, { status: 401 });
-  }
-
   let decoded;
   try {
-    decoded = await getAdminAuth().verifyIdToken(idToken);
-  } catch {
-    return NextResponse.json({ error: "Invalid ID token" }, { status: 401 });
+    ({ decoded } = await requireAuth(request));
+  } catch (err) {
+    if (err instanceof UnauthenticatedError) {
+      return NextResponse.json({ error: err.message }, { status: 401 });
+    }
+    throw err;
   }
 
   try {
-    const { following } = await toggleFollow(decoded.uid, targetUid);
-    return NextResponse.json({ following });
+    await followUser(decoded.uid, targetUid);
+    return NextResponse.json({ following: true });
   } catch (err) {
     if (err instanceof CannotFollowSelfError) {
       return NextResponse.json({ error: err.message }, { status: 400 });
@@ -36,10 +36,35 @@ export async function POST(
     if (err instanceof UserNotFoundError) {
       return NextResponse.json({ error: err.message }, { status: 404 });
     }
-    console.error(err);
-    return NextResponse.json(
-      { error: "Failed to update follow status." },
-      { status: 500 },
-    );
+    console.error("[PUT /api/users/:uid/follow]", { uid: decoded.uid, targetUid, err });
+    return NextResponse.json({ error: "Failed to follow user." }, { status: 500 });
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ uid: string }> },
+) {
+  const { uid: targetUid } = await params;
+
+  let decoded;
+  try {
+    ({ decoded } = await requireAuth(request));
+  } catch (err) {
+    if (err instanceof UnauthenticatedError) {
+      return NextResponse.json({ error: err.message }, { status: 401 });
+    }
+    throw err;
+  }
+
+  try {
+    await unfollowUser(decoded.uid, targetUid);
+    return NextResponse.json({ following: false });
+  } catch (err) {
+    if (err instanceof UserNotFoundError) {
+      return NextResponse.json({ error: err.message }, { status: 404 });
+    }
+    console.error("[DELETE /api/users/:uid/follow]", { uid: decoded.uid, targetUid, err });
+    return NextResponse.json({ error: "Failed to unfollow user." }, { status: 500 });
   }
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { toggleLike } from "@/lib/data/postsClient";
+import { setPostLiked } from "@/lib/data/postsClient";
 
 export function LikeButton({
   postId,
@@ -23,7 +23,7 @@ export function LikeButton({
     setCount((c) => c + (optimisticLiked ? 1 : -1));
 
     try {
-      const result = await toggleLike(postId);
+      const result = await setPostLiked(postId, optimisticLiked);
       setLiked(result.liked);
       setCount(result.likeCount);
     } catch {

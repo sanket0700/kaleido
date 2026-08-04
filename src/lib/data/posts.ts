@@ -2,6 +2,8 @@ import "server-only";
 
 import { FieldValue, type Timestamp } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase/admin";
+import { COLLECTIONS, SUBCOLLECTIONS } from "@/lib/data/collections";
+import { ProfileNotFoundError } from "@/lib/data/users";
 
 export {
   MAX_CAPTION_LENGTH,
@@ -35,7 +37,7 @@ export class PostNotFoundError extends Error {
 }
 
 export async function getPost(postId: string): Promise<Post | null> {
-  const snap = await getAdminDb().collection("posts").doc(postId).get();
+  const snap = await getAdminDb().collection(COLLECTIONS.posts).doc(postId).get();
   if (!snap.exists) return null;
   return { id: postId, ...(snap.data() as Omit<Post, "id">) };
 }
@@ -51,7 +53,7 @@ export async function getPostsByAuthors(authorIds: string[]): Promise<Post[]> {
   if (authorIds.length === 0) return [];
 
   const snap = await getAdminDb()
-    .collection("posts")
+    .collection(COLLECTIONS.posts)
     .where("authorId", "in", authorIds.slice(0, MAX_FEED_AUTHORS))
     .orderBy("createdAt", "desc")
     .limit(FEED_PAGE_SIZE)
@@ -72,14 +74,12 @@ export async function createPost(
   caption: string,
 ): Promise<string> {
   const db = getAdminDb();
-  const postRef = db.collection("posts").doc();
-  const userRef = db.collection("users").doc(authorId);
+  const postRef = db.collection(COLLECTIONS.posts).doc();
+  const userRef = db.collection(COLLECTIONS.users).doc(authorId);
 
   await db.runTransaction(async (tx) => {
     const userSnap = await tx.get(userRef);
-    if (!userSnap.exists) {
-      throw new Error("PROFILE_NOT_FOUND");
-    }
+    if (!userSnap.exists) throw new ProfileNotFoundError();
 
     tx.set(postRef, {
       authorId,
@@ -95,50 +95,63 @@ export async function createPost(
   return postRef.id;
 }
 
-export async function isLikedByUser(
-  postId: string,
-  uid: string,
-): Promise<boolean> {
+export async function isLikedByUser(postId: string, uid: string): Promise<boolean> {
   const snap = await getAdminDb()
-    .collection("posts")
+    .collection(COLLECTIONS.posts)
     .doc(postId)
-    .collection("likes")
+    .collection(SUBCOLLECTIONS.likes)
     .doc(uid)
     .get();
   return snap.exists;
 }
 
-/** Toggles a like and adjusts likeCount in one transaction. Sets the
- * count directly (rather than FieldValue.increment) so the resulting
- * value can be read back and returned to the caller without a second
- * round-trip, and clamped defensively at 0. */
-export async function toggleLike(
+/** Idempotent: liking an already-liked post is a no-op that returns the
+ * current count rather than double-incrementing. Split from a single
+ * toggle endpoint on purpose - a toggle can't be retried safely (a
+ * double-click or a retried request flips state twice), and a request log
+ * showing POST .../like tells you nothing about which direction it went,
+ * whereas PUT vs DELETE does. */
+export async function likePost(
   postId: string,
   uid: string,
-): Promise<{ liked: boolean; likeCount: number }> {
+): Promise<{ liked: true; likeCount: number }> {
   const db = getAdminDb();
-  const postRef = db.collection("posts").doc(postId);
-  const likeRef = postRef.collection("likes").doc(uid);
+  const postRef = db.collection(COLLECTIONS.posts).doc(postId);
+  const likeRef = postRef.collection(SUBCOLLECTIONS.likes).doc(uid);
 
   return db.runTransaction(async (tx) => {
-    const [postSnap, likeSnap] = await Promise.all([
-      tx.get(postRef),
-      tx.get(likeRef),
-    ]);
+    const [postSnap, likeSnap] = await Promise.all([tx.get(postRef), tx.get(likeRef)]);
     if (!postSnap.exists) throw new PostNotFoundError();
 
     const currentCount = (postSnap.data()?.likeCount as number | undefined) ?? 0;
-    const liked = !likeSnap.exists;
-    const likeCount = liked ? currentCount + 1 : Math.max(0, currentCount - 1);
+    if (likeSnap.exists) return { liked: true, likeCount: currentCount };
 
-    if (liked) {
-      tx.set(likeRef, { createdAt: FieldValue.serverTimestamp() });
-    } else {
-      tx.delete(likeRef);
-    }
+    const likeCount = currentCount + 1;
+    tx.set(likeRef, { createdAt: FieldValue.serverTimestamp() });
     tx.update(postRef, { likeCount });
+    return { liked: true, likeCount };
+  });
+}
 
-    return { liked, likeCount };
+export async function unlikePost(
+  postId: string,
+  uid: string,
+): Promise<{ liked: false; likeCount: number }> {
+  const db = getAdminDb();
+  const postRef = db.collection(COLLECTIONS.posts).doc(postId);
+  const likeRef = postRef.collection(SUBCOLLECTIONS.likes).doc(uid);
+
+  return db.runTransaction(async (tx) => {
+    const [postSnap, likeSnap] = await Promise.all([tx.get(postRef), tx.get(likeRef)]);
+    if (!postSnap.exists) throw new PostNotFoundError();
+
+    const currentCount = (postSnap.data()?.likeCount as number | undefined) ?? 0;
+    if (!likeSnap.exists) return { liked: false, likeCount: currentCount };
+
+    const likeCount = Math.max(0, currentCount - 1);
+    tx.delete(likeRef);
+    tx.update(postRef, { likeCount });
+    return { liked: false, likeCount };
   });
 }
 
@@ -146,9 +159,9 @@ const MAX_COMMENTS_PER_PAGE = 100;
 
 export async function getComments(postId: string): Promise<Comment[]> {
   const snap = await getAdminDb()
-    .collection("posts")
+    .collection(COLLECTIONS.posts)
     .doc(postId)
-    .collection("comments")
+    .collection(SUBCOLLECTIONS.comments)
     .orderBy("createdAt", "asc")
     .limit(MAX_COMMENTS_PER_PAGE)
     .get();
@@ -168,8 +181,8 @@ export async function addComment(
   text: string,
 ): Promise<string> {
   const db = getAdminDb();
-  const postRef = db.collection("posts").doc(postId);
-  const commentRef = postRef.collection("comments").doc();
+  const postRef = db.collection(COLLECTIONS.posts).doc(postId);
+  const commentRef = postRef.collection(SUBCOLLECTIONS.comments).doc();
 
   await db.runTransaction(async (tx) => {
     const postSnap = await tx.get(postRef);

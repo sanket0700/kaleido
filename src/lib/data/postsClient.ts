@@ -2,6 +2,7 @@
 
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { getFirebaseAuth, getFirebaseStorage } from "@/lib/firebase/client";
+import { apiFetch } from "@/lib/data/apiFetch";
 
 function safeExtension(fileName: string): string {
   const ext = fileName.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -32,54 +33,27 @@ export async function createPost(
   imageURLs: string[],
   caption: string,
 ): Promise<string> {
-  const user = getFirebaseAuth().currentUser;
-  if (!user) throw new Error("Not signed in.");
-  const idToken = await user.getIdToken();
-
-  const res = await fetch("/api/posts", {
+  const data = await apiFetch<{ postId: string }>("/api/posts", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ idToken, imageURLs, caption }),
+    body: { imageURLs, caption },
   });
-  if (!res.ok) {
-    const data = await res.json().catch(() => null);
-    throw new Error(data?.error ?? "Couldn't create post.");
-  }
-  const data = await res.json();
-  return data.postId as string;
+  return data.postId;
 }
 
-export async function toggleLike(
+/** Explicit desired state, not a toggle - the caller (LikeButton) already
+ * knows what it wants from its own optimistic UI state, so there's no
+ * reason to ask the server to flip-and-report-back. Dispatches to the
+ * matching idempotent PUT/DELETE endpoint. */
+export async function setPostLiked(
   postId: string,
+  liked: boolean,
 ): Promise<{ liked: boolean; likeCount: number }> {
-  const user = getFirebaseAuth().currentUser;
-  if (!user) throw new Error("Not signed in.");
-  const idToken = await user.getIdToken();
-
-  const res = await fetch(`/api/posts/${postId}/like`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ idToken }),
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => null);
-    throw new Error(data?.error ?? "Couldn't update like.");
-  }
-  return res.json();
+  return apiFetch(`/api/posts/${postId}/like`, { method: liked ? "PUT" : "DELETE" });
 }
 
 export async function addComment(postId: string, text: string): Promise<void> {
-  const user = getFirebaseAuth().currentUser;
-  if (!user) throw new Error("Not signed in.");
-  const idToken = await user.getIdToken();
-
-  const res = await fetch(`/api/posts/${postId}/comments`, {
+  await apiFetch(`/api/posts/${postId}/comments`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ idToken, text }),
+    body: { text },
   });
-  if (!res.ok) {
-    const data = await res.json().catch(() => null);
-    throw new Error(data?.error ?? "Couldn't post comment.");
-  }
 }

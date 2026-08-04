@@ -1,26 +1,26 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { getAdminAuth } from "@/lib/firebase/admin";
+import { requireAuth, UnauthenticatedError } from "@/lib/auth/requireAuth";
 import {
   createPost,
   MAX_CAPTION_LENGTH,
   MAX_IMAGES_PER_POST,
 } from "@/lib/data/posts";
+import { ProfileNotFoundError } from "@/lib/data/users";
 import { isOwnStorageUrl } from "@/lib/storage/validateStorageUrl";
 
 export async function POST(request: NextRequest) {
-  const body = await request.json().catch(() => null);
-  const idToken = body?.idToken;
-  if (typeof idToken !== "string" || !idToken) {
-    return NextResponse.json({ error: "Missing idToken" }, { status: 401 });
-  }
-
   let decoded;
   try {
-    decoded = await getAdminAuth().verifyIdToken(idToken);
-  } catch {
-    return NextResponse.json({ error: "Invalid ID token" }, { status: 401 });
+    ({ decoded } = await requireAuth(request));
+  } catch (err) {
+    if (err instanceof UnauthenticatedError) {
+      return NextResponse.json({ error: err.message }, { status: 401 });
+    }
+    throw err;
   }
+
+  const body = await request.json().catch(() => null);
 
   const imageURLs = Array.isArray(body?.imageURLs) ? body.imageURLs : [];
   if (imageURLs.length === 0 || imageURLs.length > MAX_IMAGES_PER_POST) {
@@ -49,7 +49,10 @@ export async function POST(request: NextRequest) {
     const postId = await createPost(decoded.uid, validatedURLs, caption);
     return NextResponse.json({ ok: true, postId }, { status: 201 });
   } catch (err) {
-    console.error(err);
+    if (err instanceof ProfileNotFoundError) {
+      return NextResponse.json({ error: err.message }, { status: 404 });
+    }
+    console.error("[POST /api/posts]", { uid: decoded.uid, err });
     return NextResponse.json(
       { error: "Failed to create post." },
       { status: 500 },
