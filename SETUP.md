@@ -48,6 +48,8 @@ gcloud services enable \
 npx firebase projects:addfirebase YOUR_PROJECT_ID
 ```
 
+> **Important**: this command links Firebase to the *existing* GCP project you just created. Do **not** instead click "Create a project" in the Firebase console - that flow creates a brand-new, separate GCP project (often named `YOUR_PROJECT_ID-firebase` or similar), leaving you with two unrelated projects: one with your `gcloud` setup (steps 3-4) and a different one with Auth/Firestore/Storage. Everything in this file - Cloud Run, Artifact Registry, the deploy service account, Workload Identity Federation - has to live in the *same* project as Firebase, since Cloud Run needs to reach Firestore/Auth/Storage directly. Run the command above first, then go to the console only to enable the individual products below.
+
 Then, in the [Firebase console](https://console.firebase.google.com/) for this project:
 
 - **Authentication** → Sign-in method → enable **Email/Password**.
