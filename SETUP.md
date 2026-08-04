@@ -58,7 +58,7 @@ Then, in the [Firebase console](https://console.firebase.google.com/) for this p
 
 ```bash
 npx firebase use --add   # pick YOUR_PROJECT_ID, alias it "production"
-npx firebase deploy --only firestore:rules,firestore:indexes,storage:rules --project YOUR_PROJECT_ID
+npx firebase deploy --only firestore:rules,firestore:indexes,storage --project YOUR_PROJECT_ID
 ```
 
 ## 7. Get the web app config
