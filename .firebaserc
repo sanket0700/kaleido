@@ -1,5 +1,8 @@
 {
   "projects": {
-    "default": "demo-kaleido"
-  }
+    "default": "demo-kaleido",
+    "production": "kaleido-0700-firebase"
+  },
+  "targets": {},
+  "etags": {}
 }
