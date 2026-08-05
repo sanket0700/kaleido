@@ -16,7 +16,48 @@ permissions:
   id-token: write
 
 jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run lint
+
+      # Java is needed by the Firestore/Storage emulators npm test spins
+      # up via `firebase emulators:exec`. ubuntu-latest usually ships one
+      # already, but pin it explicitly rather than depend on runner-image
+      # defaults that can change.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      # Emulator binaries (~150MB) would otherwise re-download on every
+      # run - cache keyed on the firebase-tools version pinned in
+      # package-lock.json, since that's what determines which emulator
+      # binaries get requested.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/firebase/emulators
+          key: firebase-emulators-${{ hashFiles('package-lock.json') }}
+
+      - run: npm test
+
+      # No NEXT_PUBLIC_FIREBASE_* build args here on purpose - this is a
+      # compiles-and-typechecks check, not a real deploy, and the app is
+      # built to tolerate missing Firebase config at build time (only
+      # needed at runtime). The real deploy build below does inject them.
+      - run: npm run build
+
   deploy:
+    needs: ci
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
