@@ -133,3 +133,26 @@ gh repo create kaleido --public --source=. --push
 (Or create it manually on github.com and `git remote add origin ...` + `git push -u origin main`.)
 
 Once steps 7 (Variables) and 9 (Secrets) are set on the GitHub repo, the next push to `main` will build and deploy to Cloud Run automatically via `.github/workflows/deploy.yml`.
+
+## 11. Protect the main branch
+
+Enforces the branching strategy in `CONTRIBUTING.md`: no direct pushes to `main`, and the `ci` check must pass before a PR can merge. This is a GitHub repo setting, not something committed to the repo, so it has to be done once via the UI or API.
+
+**UI**: Settings → Branches (or "Rules → Rulesets" on newer GitHub UIs) → Add branch protection rule → branch name pattern `main` → enable "Require a pull request before merging" and "Require status checks to pass before merging", then search for and add the `ci` check.
+
+**Or via the API** (needs a `gh auth login` with repo admin rights):
+
+```bash
+gh api repos/YOUR_GITHUB_USERNAME/kaleido/branches/main/protection \
+  --method PUT \
+  --input - <<'EOF'
+{
+  "required_status_checks": { "strict": false, "contexts": ["ci"] },
+  "enforce_admins": false,
+  "required_pull_request_reviews": null,
+  "restrictions": null
+}
+EOF
+```
+
+`required_pull_request_reviews` is deliberately `null` (no required approving review) - there's no second person to review a solo project's PRs, so requiring one would just block merges on nobody. The PR-plus-passing-CI requirement is the actual gate; add reviewer requirements later if this ever gets a second contributor.
